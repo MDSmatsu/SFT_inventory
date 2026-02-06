@@ -332,8 +332,8 @@ export default function App() {
                 <label htmlFor="newMode" style={{ fontSize: 13, fontWeight: 700 }}>
                   マスタに無い種類を入力（新規登録）
                 </label>
-                ※すでに登録されているメーカーや型式のマスタ登録をする場合は、初めにメーカーや型式を選択してから☑してください。
               </div>
+              <div style={styles.help}>※すでに登録されているメーカーや型式のマスタ登録をする場合は、初めにメーカーや型式を選択してから☑してください。</div>
 
               {/* メーカー・型式 */}
               <div style={row2Style}>
