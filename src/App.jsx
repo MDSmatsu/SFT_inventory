@@ -5,30 +5,148 @@ const GAS_WEBAPP_URL = import.meta.env.VITE_GAS_WEBAPP_URL;
 function uniq(arr) {
   return Array.from(new Set(arr.filter((v) => v !== "" && v !== null && v !== undefined)));
 }
+function round2(n) {
+  return Math.round(n * 100) / 100;
+}
+function fmt2(n) {
+  const v = Number(n);
+  if (Number.isNaN(v)) return "";
+  return round2(v).toFixed(2);
+}
 
 export default function App() {
   const [loading, setLoading] = useState(true);
   const [master, setMaster] = useState([]);
 
-  // 入力項目
+  // inputs
   const [code, setCode] = useState("");
   const [maker, setMaker] = useState("");
   const [model, setModel] = useState("");
   const [dia, setDia] = useState("");
+
+  const [newMode, setNewMode] = useState(false);
+
   const [location, setLocation] = useState("");
   const [qty, setQty] = useState("");
 
-  // 任意
+  // optional
   const [hon, setHon] = useState("");
   const [note, setNote] = useState("");
 
-  const [newMode, setNewMode] = useState(false);
   const [sending, setSending] = useState(false);
   const [msg, setMsg] = useState("");
 
-  // --- マスタ取得 ---
+  // ---- styles（崩れ対策：grid + 統一幅）
+  const styles = {
+    page: {
+      minHeight: "100vh",
+      background: "#fafafa",
+      color: "#111",
+      padding: 16,
+      fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif",
+    },
+    card: {
+      maxWidth: 640,
+      margin: "0 auto",
+      background: "#fff",
+      border: "1px solid #eaeaea",
+      borderRadius: 16,
+      padding: 16,
+      boxShadow: "0 6px 20px rgba(0,0,0,0.04)",
+    },
+    titleRow: {
+      display: "flex",
+      justifyContent: "space-between",
+      gap: 12,
+      alignItems: "baseline",
+      flexWrap: "wrap",
+      marginBottom: 8,
+    },
+    h1: { margin: 0, fontSize: 22, letterSpacing: 0.2 },
+    sub: { margin: 0, opacity: 0.7, fontSize: 13 },
+    alert: {
+      marginTop: 10,
+      padding: "10px 12px",
+      borderRadius: 12,
+      border: "1px solid #e5e5e5",
+      background: "#fcfcfc",
+      fontSize: 14,
+      whiteSpace: "pre-wrap",
+    },
+    form: { marginTop: 14 },
+    section: {
+      display: "grid",
+      gap: 12,
+    },
+    row2: {
+      display: "grid",
+      gridTemplateColumns: "1fr 1fr",
+      gap: 12,
+    },
+    // スマホは1列
+    row2Mobile: {
+      display: "grid",
+      gridTemplateColumns: "1fr",
+      gap: 12,
+    },
+    field: { display: "grid", gap: 6 },
+    label: { fontSize: 13, fontWeight: 700 },
+    help: { fontSize: 12, opacity: 0.65, marginTop: -2 },
+    input: {
+      width: "100%",
+      height: 44,
+      padding: "0 12px",
+      borderRadius: 12,
+      border: "1px solid #d9d9d9",
+      outline: "none",
+      fontSize: 14,
+      background: "#fff",
+    },
+    select: {
+      width: "100%",
+      height: 44,
+      padding: "0 12px",
+      borderRadius: 12,
+      border: "1px solid #d9d9d9",
+      outline: "none",
+      fontSize: 14,
+      background: "#fff",
+    },
+    textarea: {
+      width: "100%",
+      padding: "10px 12px",
+      borderRadius: 12,
+      border: "1px solid #d9d9d9",
+      outline: "none",
+      fontSize: 14,
+      background: "#fff",
+      resize: "vertical",
+      minHeight: 90,
+    },
+    checkRow: {
+      display: "flex",
+      alignItems: "center",
+      gap: 8,
+      padding: "8px 10px",
+      border: "1px solid #efefef",
+      borderRadius: 12,
+      background: "#fafafa",
+    },
+    btn: {
+      width: "100%",
+      height: 48,
+      borderRadius: 14,
+      border: "none",
+      fontWeight: 800,
+      fontSize: 15,
+      cursor: "pointer",
+    },
+    btnDisabled: { opacity: 0.6, cursor: "not-allowed" },
+  };
+
+  // ---- data
   async function fetchMaster() {
-    if (!GAS_WEBAPP_URL) throw new Error("GAS URL 未設定");
+    if (!GAS_WEBAPP_URL) throw new Error("VITE_GAS_WEBAPP_URL が未設定です");
 
     const res = await fetch(GAS_WEBAPP_URL, {
       method: "POST",
@@ -38,7 +156,6 @@ export default function App() {
 
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || "master取得失敗");
-
     setMaster(data.master || []);
   }
 
@@ -55,67 +172,103 @@ export default function App() {
     })();
   }, []);
 
-  // --- コード入力で自動補完 ---
+  // code -> autofill
   useEffect(() => {
-    if (!code) return;
-    const hit = master.find((r) => String(r.code) === String(code));
+    const c = code.trim();
+    if (!c) return;
+    const hit = master.find((r) => String(r.code) === c);
     if (hit) {
-      setMaker(hit.maker);
-      setModel(hit.model);
-      setDia(String(hit.dia));
+      setMaker(hit.maker || "");
+      setModel(hit.model || "");
+      setDia(hit.dia !== null && hit.dia !== undefined ? String(hit.dia) : "");
       setNewMode(false);
+      setMsg("");
     }
   }, [code, master]);
 
-  // --- 親子プルダウン ---
-  const makerOptions = useMemo(
-    () => uniq(master.map((r) => r.maker)),
-    [master]
-  );
+  // dropdown options
+  const makerOptions = useMemo(() => uniq(master.map((r) => r.maker)).sort((a, b) => String(a).localeCompare(String(b), "ja")), [master]);
 
-  const modelOptions = useMemo(
-    () => uniq(master.filter((r) => r.maker === maker).map((r) => r.model)),
-    [master, maker]
-  );
+  const modelOptions = useMemo(() => {
+    const m = maker.trim();
+    if (!m) return [];
+    return uniq(master.filter((r) => r.maker === m).map((r) => r.model)).sort((a, b) => String(a).localeCompare(String(b), "ja"));
+  }, [master, maker]);
 
-  const diaOptions = useMemo(
-    () =>
-      uniq(
-        master
-          .filter((r) => r.maker === maker && r.model === model)
-          .map((r) => String(r.dia))
-      ).sort((a, b) => Number(a) - Number(b)),
-    [master, maker, model]
-  );
+  const diaOptions = useMemo(() => {
+    const m = maker.trim();
+    const mo = model.trim();
+    if (!m || !mo) return [];
+    const list = master
+      .filter((r) => r.maker === m && r.model === mo)
+      .map((r) => r.dia)
+      .filter((v) => v !== null && v !== undefined);
+    return uniq(list).sort((a, b) => Number(a) - Number(b)).map((x) => String(x));
+  }, [master, maker, model]);
 
-  // --- 送信 ---
+  // dropdown tuple -> code autofill（既存のみ）
+  useEffect(() => {
+    if (newMode) return;
+    const m = maker.trim();
+    const mo = model.trim();
+    const d = Number(dia);
+    if (!m || !mo || Number.isNaN(d)) return;
+
+    const hit = master.find(
+      (r) =>
+        r.maker === m &&
+        r.model === mo &&
+        r.dia !== null &&
+        Math.abs(Number(r.dia) - d) < 1e-9
+    );
+    if (hit) setCode(String(hit.code));
+  }, [maker, model, dia, master, newMode]);
+
+  function validateRequired() {
+    if (!location) return "保管場所を選択して";
+    const q = Number(qty);
+    if (Number.isNaN(q)) return "数量が数値じゃない";
+
+    if (code.trim()) return null;
+
+    if (!maker.trim()) return "メーカーを選択/入力して";
+    if (!model.trim()) return "型式を選択/入力して";
+    const d = Number(dia);
+    if (Number.isNaN(d)) return "線径が数値じゃない";
+    return null;
+  }
+
+  function resetForm() {
+    setCode("");
+    setMaker("");
+    setModel("");
+    setDia("");
+    setLocation("");
+    setQty("");
+    setHon("");
+    setNote("");
+    setNewMode(false);
+  }
+
   async function onSubmit(e) {
     e.preventDefault();
     setMsg("");
 
-    if (!location || !qty) {
-      setMsg("❌ 必須項目が未入力です");
-      return;
-    }
-
-    if (!code && (!maker || !model || dia === "")) {
-      setMsg("❌ コード または メーカー・型式・線径が必要です");
-      return;
-    }
+    const err = validateRequired();
+    if (err) return setMsg(`❌ ${err}`);
 
     setSending(true);
-
     try {
       const payload = {
         action: "submit",
-        code,
-        maker,
-        model,
+        code: code.trim() || "",
+        maker: maker.trim() || "",
+        model: model.trim() || "",
         dia: dia === "" ? "" : Number(dia),
         location,
         qty: Number(qty),
-        hon,
-        note,
+        hon: hon.trim() || "",
+        note: note.trim() || "",
       };
 
       const res = await fetch(GAS_WEBAPP_URL, {
@@ -128,19 +281,8 @@ export default function App() {
       if (!data.ok) throw new Error(data.error || "送信失敗");
 
       await fetchMaster();
-
-      // リセット
-      setCode("");
-      setMaker("");
-      setModel("");
-      setDia("");
-      setLocation("");
-      setQty("");
-      setHon("");
-      setNote("");
-      setNewMode(false);
-
-      setMsg("✅ 送信完了");
+      resetForm();
+      setMsg("✅ 送信完了（次どうぞ）");
     } catch (e2) {
       setMsg(`❌ ${e2.message}`);
     } finally {
@@ -148,82 +290,215 @@ export default function App() {
     }
   }
 
+  const disabledAll = loading || sending;
+
+  // media queryなしでスマホ最適化：画面幅で切替
+  const isNarrow = typeof window !== "undefined" ? window.innerWidth < 520 : false;
+  const row2Style = isNarrow ? styles.row2Mobile : styles.row2;
+
   return (
-    <div style={{ maxWidth: 520, margin: "24px auto", padding: 16 }}>
-      <h2>SFT 送信フォーム</h2>
-      <p>マスタ件数：{master.length}</p>
-
-      {msg && <div style={{ marginBottom: 12 }}>{msg}</div>}
-
-      <form onSubmit={onSubmit}>
-        <label>コード</label>
-        <input value={code} onChange={(e) => setCode(e.target.value)} />
-
-        <div>
-          <input
-            type="checkbox"
-            checked={newMode}
-            onChange={(e) => setNewMode(e.target.checked)}
-          />
-          マスタに無い種類を入力（新規）
+    <div style={styles.page}>
+      <div style={styles.card}>
+        <div style={styles.titleRow}>
+          <h1 style={styles.h1}>SFT 送信フォーム</h1>
+          <p style={styles.sub}>マスタ件数：{master.length}</p>
         </div>
 
-        <label>メーカー（必須）</label>
-        {newMode ? (
-          <input value={maker} onChange={(e) => setMaker(e.target.value)} />
-        ) : (
-          <select value={maker} onChange={(e) => setMaker(e.target.value)}>
-            <option value="">選択</option>
-            {makerOptions.map((m) => (
-              <option key={m}>{m}</option>
-            ))}
-          </select>
-        )}
+        {msg && <div style={styles.alert}>{msg}</div>}
 
-        <label>型式（必須）</label>
-        {newMode ? (
-          <input value={model} onChange={(e) => setModel(e.target.value)} />
-        ) : (
-          <select value={model} onChange={(e) => setModel(e.target.value)}>
-            <option value="">選択</option>
-            {modelOptions.map((m) => (
-              <option key={m}>{m}</option>
-            ))}
-          </select>
-        )}
+        <form onSubmit={onSubmit} style={styles.form}>
+          <fieldset disabled={disabledAll} style={{ border: "none", padding: 0, margin: 0 }}>
+            <div style={styles.section}>
+              {/* コード */}
+              <div style={styles.field}>
+                <div style={styles.label}>コード（入力すると自動補完）</div>
+                <input
+                  style={styles.input}
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  placeholder="例: 123"
+                />
+                <div style={styles.help}>※コードがある場合はコード優先でマスタ参照</div>
+              </div>
 
-        <label>線径（必須・数値）</label>
-        {newMode ? (
-          <input value={dia} onChange={(e) => setDia(e.target.value)} />
-        ) : (
-          <select value={dia} onChange={(e) => setDia(e.target.value)}>
-            <option value="">選択</option>
-            {diaOptions.map((d) => (
-              <option key={d}>{d}</option>
-            ))}
-          </select>
-        )}
+              {/* 新規モード */}
+              <div style={styles.checkRow}>
+                <input
+                  id="newMode"
+                  type="checkbox"
+                  checked={newMode}
+                  onChange={(e) => setNewMode(e.target.checked)}
+                />
+                <label htmlFor="newMode" style={{ fontSize: 13, fontWeight: 700 }}>
+                  マスタに無い種類を入力（新規登録）
+                </label>
+              </div>
 
-        <label>保管場所（必須）</label>
-        <select value={location} onChange={(e) => setLocation(e.target.value)}>
-          <option value="">選択</option>
-          <option value="現場在庫">現場在庫</option>
-          <option value="倉庫在庫">倉庫在庫</option>
-        </select>
+              {/* メーカー・型式 */}
+              <div style={row2Style}>
+                <div style={styles.field}>
+                  <div style={styles.label}>メーカー（必須）</div>
+                  {newMode ? (
+                    <input
+                      style={styles.input}
+                      value={maker}
+                      onChange={(e) => setMaker(e.target.value)}
+                      placeholder="例: プロテリアル"
+                    />
+                  ) : (
+                    <select
+                      style={styles.select}
+                      value={maker}
+                      onChange={(e) => {
+                        setMaker(e.target.value);
+                        setModel("");
+                        setDia("");
+                        setCode("");
+                      }}
+                    >
+                      <option value="">選択してください</option>
+                      {makerOptions.map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
 
-        <label>数量（必須）</label>
-        <input value={qty} onChange={(e) => setQty(e.target.value)} />
+                <div style={styles.field}>
+                  <div style={styles.label}>型式（必須）</div>
+                  {newMode ? (
+                    <input
+                      style={styles.input}
+                      value={model}
+                      onChange={(e) => setModel(e.target.value)}
+                      placeholder="例: 2AMW-XV"
+                    />
+                  ) : (
+                    <select
+                      style={styles.select}
+                      value={model}
+                      onChange={(e) => {
+                        setModel(e.target.value);
+                        setDia("");
+                        setCode("");
+                      }}
+                      disabled={!maker}
+                    >
+                      <option value="">選択してください</option>
+                      {modelOptions.map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              </div>
 
-        <label>本数（任意）</label>
-        <input value={hon} onChange={(e) => setHon(e.target.value)} />
+              {/* 線径・保管場所 */}
+              <div style={row2Style}>
+                <div style={styles.field}>
+                  <div style={styles.label}>線径（必須・数値）</div>
+                  {newMode ? (
+                    <input
+                      style={styles.input}
+                      value={dia}
+                      onChange={(e) => setDia(e.target.value)}
+                      inputMode="decimal"
+                      placeholder="例: 0.14"
+                    />
+                  ) : (
+                    <select
+                      style={styles.select}
+                      value={dia}
+                      onChange={(e) => {
+                        setDia(e.target.value);
+                        setCode("");
+                      }}
+                      disabled={!maker || !model}
+                    >
+                      <option value="">選択してください</option>
+                      {diaOptions.map((d) => (
+                        <option key={d} value={d}>
+                          {d}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
 
-        <label>備考（任意）</label>
-        <textarea value={note} onChange={(e) => setNote(e.target.value)} />
+                <div style={styles.field}>
+                  <div style={styles.label}>保管場所（必須）</div>
+                  <select
+                    style={styles.select}
+                    value={location}
+                    onChange={(e) => setLocation(e.target.value)}
+                  >
+                    <option value="">選択してください</option>
+                    <option value="現場在庫">現場在庫</option>
+                    <option value="倉庫在庫">倉庫在庫</option>
+                  </select>
+                </div>
+              </div>
 
-        <button type="submit" disabled={sending}>
-          {sending ? "送信中..." : "送信"}
-        </button>
-      </form>
+              {/* 数量・本数 */}
+              <div style={row2Style}>
+                <div style={styles.field}>
+                  <div style={styles.label}>数量（必須・小数第2位）</div>
+                  <input
+                    style={styles.input}
+                    value={qty}
+                    onChange={(e) => setQty(e.target.value)}
+                    onBlur={() => setQty((v) => (v === "" ? "" : fmt2(v)))}
+                    inputMode="decimal"
+                    placeholder="例: 12.34"
+                  />
+                </div>
+
+                <div style={styles.field}>
+                  <div style={styles.label}>本数（任意）</div>
+                  <input
+                    style={styles.input}
+                    value={hon}
+                    onChange={(e) => setHon(e.target.value)}
+                    inputMode="numeric"
+                    placeholder="例: 25"
+                  />
+                </div>
+              </div>
+
+              {/* 備考 */}
+              <div style={styles.field}>
+                <div style={styles.label}>備考（任意）</div>
+                <textarea
+                  style={styles.textarea}
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder="例: ロットNo.、注意点など"
+                />
+              </div>
+
+              {/* 送信 */}
+              <button
+                type="submit"
+                disabled={sending}
+                style={{
+                  ...styles.btn,
+                  ...(sending ? styles.btnDisabled : null),
+                }}
+              >
+                {sending ? "送信中..." : "送信"}
+              </button>
+
+              <div style={{ fontSize: 12, opacity: 0.7 }}>
+                ※ 本数・備考以外は必須。送信中は二重送信を防止します。
+              </div>
+            </div>
+          </fieldset>
+        </form>
+      </div>
     </div>
   );
 }
