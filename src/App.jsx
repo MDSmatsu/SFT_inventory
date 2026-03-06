@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useRef } from "react";
 
 const GAS_WEBAPP_URL = import.meta.env.VITE_GAS_WEBAPP_URL;
 
@@ -33,13 +33,17 @@ export default function App() {
   const [hon, setHon] = useState("");
   const [note, setNote] = useState("");
 
-  // ========== 前月データ ==========
+  // 前月データ
   const [previousQty, setPreviousQty] = useState(null);
   const [previousLoading, setPreviousLoading] = useState(false);
-  // ================================
 
   const [sending, setSending] = useState(false);
   const [msg, setMsg] = useState("");
+
+  // ========== 高速化：Ref & AbortController ==========
+  const prevDataCacheRef = useRef({});
+  const abortControllerRef = useRef(null);
+  // =================================================
 
   // ---- styles
   const styles = {
@@ -177,18 +181,31 @@ export default function App() {
     setMaster(data.master || []);
   }
 
-  // ========== 前月データ取得（タイムアウト付き） ==========
+  // ========== 高速化：前月データ取得 ==========
   async function fetchPreviousData(productCode) {
     if (!productCode.trim()) {
       setPreviousQty(null);
       return;
     }
 
-    setPreviousLoading(true);
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5秒でタイムアウト
+    // キャッシュチェック
+    if (prevDataCacheRef.current[productCode]) {
+      setPreviousQty(prevDataCacheRef.current[productCode]);
+      return;
+    }
 
+    setPreviousLoading(true);
+    
+    // 前のリクエストをキャンセル
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    
+    abortControllerRef.current = new AbortController();
+    const controller = abortControllerRef.current;
+    const timeoutId = setTimeout(() => controller.abort(), 3000); // 3秒タイムアウト
+
+    try {
       const res = await fetch(GAS_WEBAPP_URL, {
         method: "POST",
         headers: { "Content-Type": "text/plain;charset=utf-8" },
@@ -202,13 +219,15 @@ export default function App() {
       clearTimeout(timeoutId);
 
       const data = await res.json();
-      if (data.ok && data.previousData) {
-        setPreviousQty(data.previousData.qty);
+      if (data.ok && data.previousData !== null && data.previousData !== undefined) {
+        const qty = data.previousData.qty;
+        setPreviousQty(qty);
+        // キャッシュに保存
+        prevDataCacheRef.current[productCode] = qty;
       } else {
         setPreviousQty(null);
       }
     } catch (e) {
-      // タイムアウトか他のエラーか
       if (e.name !== "AbortError") {
         console.error("前月データ取得エラー:", e);
       }
@@ -217,13 +236,17 @@ export default function App() {
       setPreviousLoading(false);
     }
   }
-  // ================================================
+  // =======================================
 
+  // ========== 初期化時：並列リクエスト +ローディング最小化 ==========
   useEffect(() => {
     (async () => {
       try {
         setLoading(true);
-        await fetchMaster();
+        // 複数のリクエストを同時実行
+        await Promise.all([
+          fetchMaster(),
+        ]);
       } catch (e) {
         setMsg(`❌ ${e.message}`);
       } finally {
@@ -231,8 +254,9 @@ export default function App() {
       }
     })();
   }, []);
+  // ============================================================
 
-  // code -> autofill + 前月データ取得
+  // code -> autofill + 前月データ取得（デバウンス付き）
   useEffect(() => {
     const c = code.trim();
     if (!c) {
@@ -249,7 +273,12 @@ export default function App() {
       setMsg("");
     }
 
-    fetchPreviousData(c);
+    // デバウンス：入力が止まってから300ms後に実行
+    const timer = setTimeout(() => {
+      fetchPreviousData(c);
+    }, 300);
+
+    return () => clearTimeout(timer);
   }, [code, master]);
 
   // dropdown options
@@ -346,9 +375,13 @@ export default function App() {
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || "送信失敗");
 
+      // ========== 高速化：送信後の処理最適化 ==========
+      // masterを再取得
       await fetchMaster();
       resetForm();
+      setPreviousQty(null); // キャッシュをクリア
       setMsg("✅ 送信完了（次どうぞ）");
+      // =============================================
     } catch (e2) {
       setMsg(`❌ ${e2.message}`);
     } finally {
@@ -366,7 +399,9 @@ export default function App() {
       <div style={styles.card}>
         <div style={styles.titleRow}>
           <h1 style={styles.h1}>SFT 送信フォーム</h1>
-          <p style={styles.sub}>マスタ件数：{master.length}</p>
+          <p style={styles.sub}>
+            {loading ? "読込中..." : `マスタ件数：${master.length}`}
+          </p>
         </div>
 
         {msg && <div style={styles.alert}>{msg}</div>}
@@ -509,7 +544,7 @@ export default function App() {
                 </div>
               </div>
 
-              {/* ========== 前月数量（線径の下） ========== */}
+              {/* 前月数量（線径の下） */}
               {code.trim() && (
                 <div style={styles.field}>
                   {previousLoading ? (
@@ -527,7 +562,6 @@ export default function App() {
                   )}
                 </div>
               )}
-              {/* ====================================== */}
 
               {/* 数量・本数 */}
               <div style={row2Style}>
