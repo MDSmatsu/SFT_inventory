@@ -33,16 +33,15 @@ export default function App() {
   const [hon, setHon] = useState("");
   const [note, setNote] = useState("");
 
-  // ========== 新規追加：前月データ ==========
+  // ========== 前月データ ==========
   const [previousQty, setPreviousQty] = useState(null);
-  const [previousLocation, setPreviousLocation] = useState("");
   const [previousLoading, setPreviousLoading] = useState(false);
-  // ==========================================
+  // ================================
 
   const [sending, setSending] = useState(false);
   const [msg, setMsg] = useState("");
 
-  // ---- styles（崩れ対策：grid + 統一幅）
+  // ---- styles
   const styles = {
     page: {
       minHeight: "100vh",
@@ -147,7 +146,6 @@ export default function App() {
       cursor: "pointer",
     },
     btnDisabled: { opacity: 0.6, cursor: "not-allowed" },
-    // ========== 新規追加：前月表示スタイル ==========
     previousDataBox: {
       padding: "10px 12px",
       borderRadius: 12,
@@ -162,7 +160,6 @@ export default function App() {
       background: "#fff8e1",
       fontSize: 13,
     },
-    // =======================================
   };
 
   // ---- data
@@ -180,16 +177,18 @@ export default function App() {
     setMaster(data.master || []);
   }
 
-  // ========== 新規追加：前月データ取得 ==========
+  // ========== 前月データ取得（タイムアウト付き） ==========
   async function fetchPreviousData(productCode) {
     if (!productCode.trim()) {
       setPreviousQty(null);
-      setPreviousLocation("");
       return;
     }
 
     setPreviousLoading(true);
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5秒でタイムアウト
+
       const res = await fetch(GAS_WEBAPP_URL, {
         method: "POST",
         headers: { "Content-Type": "text/plain;charset=utf-8" },
@@ -197,25 +196,28 @@ export default function App() {
           action: "getPreviousMonth", 
           code: productCode.trim() 
         }),
+        signal: controller.signal,
       });
+
+      clearTimeout(timeoutId);
 
       const data = await res.json();
       if (data.ok && data.previousData) {
         setPreviousQty(data.previousData.qty);
-        setPreviousLocation(data.previousData.location || "");
       } else {
         setPreviousQty(null);
-        setPreviousLocation("");
       }
     } catch (e) {
-      console.error("前月データ取得エラー:", e);
+      // タイムアウトか他のエラーか
+      if (e.name !== "AbortError") {
+        console.error("前月データ取得エラー:", e);
+      }
       setPreviousQty(null);
-      setPreviousLocation("");
     } finally {
       setPreviousLoading(false);
     }
   }
-  // ==========================================
+  // ================================================
 
   useEffect(() => {
     (async () => {
@@ -235,11 +237,9 @@ export default function App() {
     const c = code.trim();
     if (!c) {
       setPreviousQty(null);
-      setPreviousLocation("");
       return;
     }
 
-    // マスタから自動補完
     const hit = master.find((r) => String(r.code) === c);
     if (hit) {
       setMaker(hit.maker || "");
@@ -249,7 +249,6 @@ export default function App() {
       setMsg("");
     }
 
-    // 前月データを取得
     fetchPreviousData(c);
   }, [code, master]);
 
@@ -273,7 +272,6 @@ export default function App() {
     return uniq(list).sort((a, b) => Number(a) - Number(b)).map((x) => String(x));
   }, [master, maker, model]);
 
-  // dropdown tuple -> code autofill（既存のみ）
   useEffect(() => {
     if (newMode) return;
     const m = maker.trim();
@@ -316,7 +314,6 @@ export default function App() {
     setNote("");
     setNewMode(false);
     setPreviousQty(null);
-    setPreviousLocation("");
   }
 
   async function onSubmit(e) {
@@ -361,7 +358,6 @@ export default function App() {
 
   const disabledAll = loading || sending;
 
-  // media queryなしでスマホ最適化：画面幅で切替
   const isNarrow = typeof window !== "undefined" ? window.innerWidth < 520 : false;
   const row2Style = isNarrow ? styles.row2Mobile : styles.row2;
 
@@ -388,28 +384,6 @@ export default function App() {
                   placeholder="例: 123"
                 />
                 <div style={styles.help}>※コードがある場合はコード優先でマスタ参照</div>
-
-                {/* ========== 新規追加：前月データ表示 ========== */}
-                {code.trim() && (
-                  <>
-                    {previousLoading ? (
-                      <div style={styles.previousDataLoading}>
-                        ⏳ ���月データ取得中...
-                      </div>
-                    ) : previousQty !== null ? (
-                      <div style={styles.previousDataBox}>
-                        <strong>📊 前月データ</strong><br />
-                        数量: <strong>{fmt2(previousQty)}</strong>
-                        {previousLocation && ` / 場所: ${previousLocation}`}
-                      </div>
-                    ) : (
-                      <div style={{ ...styles.previousDataBox, borderColor: "#ccc", background: "#f5f5f5", color: "#666" }}>
-                        前月データなし
-                      </div>
-                    )}
-                  </>
-                )}
-                {/* ======================================== */}
               </div>
 
               {/* 新規モード */}
@@ -534,6 +508,26 @@ export default function App() {
                   </select>
                 </div>
               </div>
+
+              {/* ========== 前月数量（線径の下） ========== */}
+              {code.trim() && (
+                <div style={styles.field}>
+                  {previousLoading ? (
+                    <div style={styles.previousDataLoading}>
+                      前月データ取得中...
+                    </div>
+                  ) : previousQty !== null ? (
+                    <div style={styles.previousDataBox}>
+                      <strong>前月数量: {fmt2(previousQty)}</strong>
+                    </div>
+                  ) : (
+                    <div style={{ ...styles.previousDataBox, borderColor: "#ccc", background: "#f5f5f5", color: "#666" }}>
+                      前月データなし
+                    </div>
+                  )}
+                </div>
+              )}
+              {/* ====================================== */}
 
               {/* 数量・本数 */}
               <div style={row2Style}>
