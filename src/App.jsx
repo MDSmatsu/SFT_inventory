@@ -40,10 +40,11 @@ export default function App() {
   const [sending, setSending] = useState(false);
   const [msg, setMsg] = useState("");
 
-  // ========== 高速化：Ref & AbortController ==========
+  // ========== 高速化：キャッシュ & AbortController ==========
   const prevDataCacheRef = useRef({});
   const abortControllerRef = useRef(null);
-  // =================================================
+  const debounceTimerRef = useRef(null);
+  // ======================================================
 
   // ---- styles
   const styles = {
@@ -181,37 +182,37 @@ export default function App() {
     setMaster(data.master || []);
   }
 
-  // ========== 高速化：前月データ取得 ==========
+  // ========== 前月データ取得（高速化版） ==========
   async function fetchPreviousData(productCode) {
     if (!productCode.trim()) {
       setPreviousQty(null);
       return;
     }
 
-    // キャッシュチェック
-    if (prevDataCacheRef.current[productCode]) {
+    // キャッシュをチェック
+    if (prevDataCacheRef.current[productCode] !== undefined) {
       setPreviousQty(prevDataCacheRef.current[productCode]);
       return;
     }
 
     setPreviousLoading(true);
-    
+
     // 前のリクエストをキャンセル
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
-    
+
     abortControllerRef.current = new AbortController();
     const controller = abortControllerRef.current;
-    const timeoutId = setTimeout(() => controller.abort(), 3000); // 3秒タイムアウト
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
 
     try {
       const res = await fetch(GAS_WEBAPP_URL, {
         method: "POST",
         headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify({ 
-          action: "getPreviousMonth", 
-          code: productCode.trim() 
+        body: JSON.stringify({
+          action: "getPreviousMonth",
+          code: productCode.trim(),
         }),
         signal: controller.signal,
       });
@@ -219,34 +220,33 @@ export default function App() {
       clearTimeout(timeoutId);
 
       const data = await res.json();
-      if (data.ok && data.previousData !== null && data.previousData !== undefined) {
+      if (data.ok && data.previousData) {
         const qty = data.previousData.qty;
         setPreviousQty(qty);
         // キャッシュに保存
         prevDataCacheRef.current[productCode] = qty;
       } else {
         setPreviousQty(null);
+        prevDataCacheRef.current[productCode] = null;
       }
     } catch (e) {
       if (e.name !== "AbortError") {
-        console.error("前月データ取得エラー:", e);
+        console.error("���月データ取得エラー:", e);
       }
       setPreviousQty(null);
+      prevDataCacheRef.current[productCode] = null;
     } finally {
       setPreviousLoading(false);
     }
   }
-  // =======================================
+  // ==============================================
 
-  // ========== 初期化時：並列リクエスト +ローディング最小化 ==========
+  // ========== 初期化（高速化） ==========
   useEffect(() => {
     (async () => {
       try {
         setLoading(true);
-        // 複数のリクエストを同時実行
-        await Promise.all([
-          fetchMaster(),
-        ]);
+        await fetchMaster();
       } catch (e) {
         setMsg(`❌ ${e.message}`);
       } finally {
@@ -254,11 +254,17 @@ export default function App() {
       }
     })();
   }, []);
-  // ============================================================
+  // ==================================
 
   // code -> autofill + 前月データ取得（デバウンス付き）
   useEffect(() => {
     const c = code.trim();
+
+    // 前のタイマーをクリア
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+
     if (!c) {
       setPreviousQty(null);
       return;
@@ -273,21 +279,30 @@ export default function App() {
       setMsg("");
     }
 
-    // デバウンス：入力が止まってから300ms後に実行
-    const timer = setTimeout(() => {
+    // デバウンス：入力が止まってから200ms後に前月データ取得
+    debounceTimerRef.current = setTimeout(() => {
       fetchPreviousData(c);
-    }, 300);
+    }, 200);
 
-    return () => clearTimeout(timer);
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
   }, [code, master]);
 
   // dropdown options
-  const makerOptions = useMemo(() => uniq(master.map((r) => r.maker)).sort((a, b) => String(a).localeCompare(String(b), "ja")), [master]);
+  const makerOptions = useMemo(
+    () => uniq(master.map((r) => r.maker)).sort((a, b) => String(a).localeCompare(String(b), "ja")),
+    [master]
+  );
 
   const modelOptions = useMemo(() => {
     const m = maker.trim();
     if (!m) return [];
-    return uniq(master.filter((r) => r.maker === m).map((r) => r.model)).sort((a, b) => String(a).localeCompare(String(b), "ja"));
+    return uniq(master.filter((r) => r.maker === m).map((r) => r.model)).sort((a, b) =>
+      String(a).localeCompare(String(b), "ja")
+    );
   }, [master, maker]);
 
   const diaOptions = useMemo(() => {
@@ -298,7 +313,9 @@ export default function App() {
       .filter((r) => r.maker === m && r.model === mo)
       .map((r) => r.dia)
       .filter((v) => v !== null && v !== undefined);
-    return uniq(list).sort((a, b) => Number(a) - Number(b)).map((x) => String(x));
+    return uniq(list)
+      .sort((a, b) => Number(a) - Number(b))
+      .map((x) => String(x));
   }, [master, maker, model]);
 
   useEffect(() => {
@@ -375,13 +392,13 @@ export default function App() {
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || "送信失敗");
 
-      // ========== 高速化：送信後の処理最適化 ==========
-      // masterを再取得
+      // ========== 送信後：キャッシュクリア ==========
+      prevDataCacheRef.current = {};
+      // ===========================================
+
       await fetchMaster();
       resetForm();
-      setPreviousQty(null); // キャッシュをクリア
       setMsg("✅ 送信完了（次どうぞ）");
-      // =============================================
     } catch (e2) {
       setMsg(`❌ ${e2.message}`);
     } finally {
@@ -407,7 +424,10 @@ export default function App() {
         {msg && <div style={styles.alert}>{msg}</div>}
 
         <form onSubmit={onSubmit} style={styles.form}>
-          <fieldset disabled={disabledAll} style={{ border: "none", padding: 0, margin: 0 }}>
+          <fieldset
+            disabled={disabledAll}
+            style={{ border: "none", padding: 0, margin: 0 }}
+          >
             <div style={styles.section}>
               {/* コード */}
               <div style={styles.field}>
@@ -418,7 +438,9 @@ export default function App() {
                   onChange={(e) => setCode(e.target.value)}
                   placeholder="例: 123"
                 />
-                <div style={styles.help}>※コードがある場合はコード優先でマスタ参照</div>
+                <div style={styles.help}>
+                  ※コードがある場合はコード優先でマスタ参照
+                </div>
               </div>
 
               {/* 新規モード */}
@@ -433,7 +455,9 @@ export default function App() {
                   マスタに無い種類を入力（新規登録）
                 </label>
               </div>
-              <div style={styles.help}>※すでに登録されているメーカーや型式のマスタ登録をする場合は、初めにメーカーや型式を選択してから☑してください。</div>
+              <div style={styles.help}>
+                ※すでに登録されているメーカーや型式のマスタ登録をする場合は、初めにメーカーや型式を選択してから☑してください。
+              </div>
 
               {/* メーカー・型式 */}
               <div style={row2Style}>
@@ -556,7 +580,14 @@ export default function App() {
                       <strong>前月数量: {fmt2(previousQty)}</strong>
                     </div>
                   ) : (
-                    <div style={{ ...styles.previousDataBox, borderColor: "#ccc", background: "#f5f5f5", color: "#666" }}>
+                    <div
+                      style={{
+                        ...styles.previousDataBox,
+                        borderColor: "#ccc",
+                        background: "#f5f5f5",
+                        color: "#666",
+                      }}
+                    >
                       前月データなし
                     </div>
                   )}
