@@ -33,6 +33,12 @@ export default function App() {
   const [hon, setHon] = useState("");
   const [note, setNote] = useState("");
 
+  // ========== 新規追加：前月データ ==========
+  const [previousQty, setPreviousQty] = useState(null);
+  const [previousLocation, setPreviousLocation] = useState("");
+  const [previousLoading, setPreviousLoading] = useState(false);
+  // ==========================================
+
   const [sending, setSending] = useState(false);
   const [msg, setMsg] = useState("");
 
@@ -83,7 +89,6 @@ export default function App() {
       gridTemplateColumns: "1fr 1fr",
       gap: 12,
     },
-    // スマホは1列
     row2Mobile: {
       display: "grid",
       gridTemplateColumns: "1fr",
@@ -142,6 +147,22 @@ export default function App() {
       cursor: "pointer",
     },
     btnDisabled: { opacity: 0.6, cursor: "not-allowed" },
+    // ========== 新規追加：前月表示スタイル ==========
+    previousDataBox: {
+      padding: "10px 12px",
+      borderRadius: 12,
+      border: "2px solid #4CAF50",
+      background: "#f1f8f4",
+      fontSize: 13,
+    },
+    previousDataLoading: {
+      padding: "10px 12px",
+      borderRadius: 12,
+      border: "1px solid #ffb74d",
+      background: "#fff8e1",
+      fontSize: 13,
+    },
+    // =======================================
   };
 
   // ---- data
@@ -159,6 +180,43 @@ export default function App() {
     setMaster(data.master || []);
   }
 
+  // ========== 新規追加：前月データ取得 ==========
+  async function fetchPreviousData(productCode) {
+    if (!productCode.trim()) {
+      setPreviousQty(null);
+      setPreviousLocation("");
+      return;
+    }
+
+    setPreviousLoading(true);
+    try {
+      const res = await fetch(GAS_WEBAPP_URL, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ 
+          action: "getPreviousMonth", 
+          code: productCode.trim() 
+        }),
+      });
+
+      const data = await res.json();
+      if (data.ok && data.previousData) {
+        setPreviousQty(data.previousData.qty);
+        setPreviousLocation(data.previousData.location || "");
+      } else {
+        setPreviousQty(null);
+        setPreviousLocation("");
+      }
+    } catch (e) {
+      console.error("前月データ取得エラー:", e);
+      setPreviousQty(null);
+      setPreviousLocation("");
+    } finally {
+      setPreviousLoading(false);
+    }
+  }
+  // ==========================================
+
   useEffect(() => {
     (async () => {
       try {
@@ -172,10 +230,16 @@ export default function App() {
     })();
   }, []);
 
-  // code -> autofill
+  // code -> autofill + 前月データ取得
   useEffect(() => {
     const c = code.trim();
-    if (!c) return;
+    if (!c) {
+      setPreviousQty(null);
+      setPreviousLocation("");
+      return;
+    }
+
+    // マスタから自動補完
     const hit = master.find((r) => String(r.code) === c);
     if (hit) {
       setMaker(hit.maker || "");
@@ -184,6 +248,9 @@ export default function App() {
       setNewMode(false);
       setMsg("");
     }
+
+    // 前月データを取得
+    fetchPreviousData(c);
   }, [code, master]);
 
   // dropdown options
@@ -248,6 +315,8 @@ export default function App() {
     setHon("");
     setNote("");
     setNewMode(false);
+    setPreviousQty(null);
+    setPreviousLocation("");
   }
 
   async function onSubmit(e) {
@@ -319,6 +388,28 @@ export default function App() {
                   placeholder="例: 123"
                 />
                 <div style={styles.help}>※コードがある場合はコード優先でマスタ参照</div>
+
+                {/* ========== 新規追加：前月データ表示 ========== */}
+                {code.trim() && (
+                  <>
+                    {previousLoading ? (
+                      <div style={styles.previousDataLoading}>
+                        ⏳ ���月データ取得中...
+                      </div>
+                    ) : previousQty !== null ? (
+                      <div style={styles.previousDataBox}>
+                        <strong>📊 前月データ</strong><br />
+                        数量: <strong>{fmt2(previousQty)}</strong>
+                        {previousLocation && ` / 場所: ${previousLocation}`}
+                      </div>
+                    ) : (
+                      <div style={{ ...styles.previousDataBox, borderColor: "#ccc", background: "#f5f5f5", color: "#666" }}>
+                        前月データなし
+                      </div>
+                    )}
+                  </>
+                )}
+                {/* ======================================== */}
               </div>
 
               {/* 新規モード */}
